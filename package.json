@@ -1,0 +1,23 @@
+{
+  "name": "sf-bulk-api",
+  "version": "0.0.0",
+  "description": "For Node.js - implements most of the original Salesforce Bulk API",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/johndstein/sf-bulk-api.git"
+  },
+  "author": "",
+  "license": "Unlicense",
+  "bugs": {
+    "url": "https://github.com/johndstein/sf-bulk-api/issues"
+  },
+  "homepage": "https://github.com/johndstein/sf-bulk-api#readme",
+  "dependencies": {
+    "axios": "0.17.1",
+    "fast-xml-parser": "2.8.2"
+  }
+}
