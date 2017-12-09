@@ -426,10 +426,10 @@ class BulkApi {
          "soapenv:Body": {
            "loginResponse": {
              "result": {
-               "metadataServerUrl": "https:wycliffe--jdswbt.cs19.my.salesforce.com/services/Soap/m/41.0/00D29000000DQIy",
+               "metadataServerUrl": "https:asdf--jdswbt.cs19.my.salesforce.com/services/Soap/m/41.0/00D29000000DQIy",
                "passwordExpired": "false",
                "sandbox": "true",
-               "serverUrl": "https:wycliffe--jdswbt.cs19.my.salesforce.com/services/Soap/u/41.0/00D29000000DQIy",
+               "serverUrl": "https:asdf--jdswbt.cs19.my.salesforce.com/services/Soap/u/41.0/00D29000000DQIy",
                "sessionId": "00D29000000DQIy!AQYAQOle2qEVYPxZcsi6FXr08049di.PAhusU6tnUMNKM_wTe6dWER3pM_icW6jJg7mx8oBCQgwmyAyKCYT9BRpE1A_LL9mJ",
                "userId": "00536000002xBG9AAM",
                "userInfo": {
@@ -453,7 +453,7 @@ class BulkApi {
                  "userId": "00536000002xBG9AAM",
                  "userLanguage": "en_US",
                  "userLocale": "en_US",
-                 "userName": "wycliffe@candoris.com.jdswbt",
+                 "userName": "asdf@candoris.com.jdswbt",
                  "userTimeZone": "America/New_York",
                  "userType": "Standard",
                  "userUiSkin": "Theme3"
