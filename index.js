@@ -4,6 +4,7 @@
 
 const axios = require('axios');
 const xmlParser = require('fast-xml-parser');
+const csvAppendStream = require('csv-append-stream');
 
 /*
 
@@ -44,6 +45,8 @@ class BulkApi {
     this.options.pkChunking = options.pkChunking || false;
     /*
       The following are set on login
+
+      See processLoginResponse() below for details.
     */
     this.loginResponse = null;
     this.sessionId = null;
@@ -51,14 +54,18 @@ class BulkApi {
     this.jobUrl = null;
     /*
       The following are set on job creation and when asking for job status.
+
+      See processJobResponse() below for details.
     */
     this.jobResonse = null;
-    this.jobId = null;
+    this.jobInfo = null;
     /*
       The following are set when getting all batch info.
+
+      See processBatchListResponse() below for details.
     */
     this.batchListResponse = null;
-    this.batchIds = null;
+    this.batchInfos = [];
     /*
       The following are set when adding a batch or getting a single batch info.
     */
@@ -120,17 +127,35 @@ class BulkApi {
     } else {
       await this.login();
     }
-    jobId = jobId || this.jobId;
-    const result = await axios.post(
-      `${this.jobUrl}/${jobId}/batch`,
-      data, {
+    jobId = jobId || this.jobInfo.id;
+    const url = `${this.jobUrl}/${jobId}/batch`;
+    const options = {
+      headers: {
+        'Content-Type': 'text/csv; charset=UTF-8',
+        'X-SFDC-Session': this.sessionId
+      }
+    };
+    const result = await axios.post(url, data, options);
+    this.batchResponse = result.data;
+    return this.batchResponse;
+  }
+
+  /*
+    Get info for all the batches in a given job.
+  */
+  async getBatchInfoList(jobId) {
+    jobId = jobId || this.jobInfo.id;
+    await this.login();
+    const reply = await axios.get(
+      this.jobUrl + `/${jobId}/batch`, {
         headers: {
-          'Content-Type': 'text/csv; charset=UTF-8',
+          'Content-Type': 'text/xml; charset=UTF-8',
           'X-SFDC-Session': this.sessionId
         }
       });
-    this.batchResponse = result.data;
-    return this.batchResponse;
+    this.batchListResponse = reply.data;
+    this.processBatchListResponse();
+    return this.batchListResponse;
   }
 
   /*
@@ -150,20 +175,29 @@ class BulkApi {
 
     Non PK Chunking queries will only have one batch, but the batch may have
     multiple query results. So don't assume one query result per batch.
+
+    TODO !!! XXX Handle PK chunking 'Records not found for this query' header
+    row!!!
+
+    TODO !!! XXX Handle stream errors. Thinking of adding error handler to
+    all streams where BulkApi emits an error even that clients can catch.
   */
   async getQueryResults(jobId) {
-    jobId = jobId || this.jobId;
+    jobId = jobId || this.jobInfo.id;
     await this.getBatchInfoList(jobId);
     const streams = [];
-    for (const batchId of this.batchIds) {
+    for (const batchInfo of this.batchInfos) {
       // https://stackoverflow.com/a/4156156/8599429
-      streams.push.apply(streams, await this.getBatchQueryResults(batchId, jobId));
+      if (batchInfo.state !== 'NotProcessed') {
+        streams.push.apply(streams,
+          await this.getBatchQueryResults(batchInfo.id, jobId));
+      }
     }
-    return streams;
+    return csvAppendStream(streams);
   }
 
   async getBatchQueryResults(batchId, jobId) {
-    jobId = jobId || this.jobId;
+    jobId = jobId || this.jobInfo.id;
     await this.login();
     const batchResultXml = await axios.get(
       `${this.jobUrl}/${jobId}/batch/${batchId}/result`, {
@@ -185,7 +219,6 @@ class BulkApi {
     }
     const streams = [];
     for (const result of brJson) {
-      console.error('resultId', result.result);
       // https://stackoverflow.com/a/4156156/8599429
       streams.push(
         await this.getBatchQueryResult(result.result, batchId, jobId));
@@ -200,8 +233,7 @@ class BulkApi {
     Looks like Salesforce breaks chunks down to not be larger than 1 GB.
   */
   async getBatchQueryResult(resultId, batchId, jobId) {
-    console.error(resultId, batchId, jobId);
-    jobId = jobId || this.jobId;
+    jobId = jobId || this.jobInfo.id;
     await this.login();
     const response = await axios.get(
       `${this.jobUrl}/${jobId}/batch/${batchId}/result/${resultId}`, {
@@ -214,31 +246,39 @@ class BulkApi {
   }
 
   /*
-
-    Return errors for insert, update, delete job as a stream.
-
-    So this is one of the huge reasons to use the new Bulk API 2.0. This old
-    Bulk API doesn't have success and error files. It just has request and
-    result files. The result file is ordered same as the request file and
-    looks like:
-
-    Id                  Success   Created   Error
-    0012900000DnTKGAA3  FALSE     FALSE     Some error info
-    0012900000DnTKHAA3  TRUE      TRUE
-
-    To make things even more interesting, if Salesforce stops processing a batch
-    at some point, the remaining rows just aren't in the result file.
-
-    This is low priority. Not going to implement this unless there are features
-    missing in the new 2.0 API and we really need to use the old.
-
+    For insert/update/delete jobs, returns the original CSV file with the data
+    that was to be inserted, updated, or deleted.
   */
-  async getErrors(jobId) {
-
+  async getBatchRequest(batchId, jobId) {
+    jobId = jobId || this.jobInfo.id;
+    await this.login();
+    const response = await axios.get(
+      `${this.jobUrl}/${jobId}/batch/${batchId}/request`, {
+        responseType: 'stream',
+        headers: {
+          'X-SFDC-Session': this.sessionId
+        }
+      });
+    return response.data;
   }
 
-  async getBatchErrors(batchId, jobId) {
-
+  /*
+    For insert/update/delete jobs, returns the results of the operation.
+    Id                  Success   Created   Error
+    0012900000DoC20AAF    false     false   Something bad happened.
+    0012900000DoC21AAF     true      true
+  */
+  async getBatchResult(batchId, jobId) {
+    jobId = jobId || this.jobInfo.id;
+    await this.login();
+    const response = await axios.get(
+      `${this.jobUrl}/${jobId}/batch/${batchId}/result`, {
+        responseType: 'stream',
+        headers: {
+          'X-SFDC-Session': this.sessionId
+        }
+      });
+    return response.data;
   }
 
   /*
@@ -250,14 +290,13 @@ class BulkApi {
   */
   async login() {
     if (!this.loginResponse) {
-      const reply = await axios.post(
-        this.loginUrl,
-        this.loginXml, {
-          headers: {
-            'Content-Type': 'text/xml; charset=UTF-8',
-            SOAPAction: 'login'
-          }
-        });
+      const options = {
+        headers: {
+          'Content-Type': 'text/xml; charset=UTF-8',
+          SOAPAction: 'login'
+        }
+      };
+      const reply = await axios.post(this.loginUrl, this.loginXml, options);
       this.loginResponse = reply.data;
       this.processLoginResponse();
     }
@@ -276,24 +315,22 @@ class BulkApi {
   async createJob() {
     if (!this.jobResonse) {
       await this.login();
-      const headers = {
-        'Content-Type': 'text/xml; charset=UTF-8',
-        // The batch retry thing causes issues for the results files.
-        // They get messed up in strange ways, so we disable it.
-        'Sforce-Disable-Batch-Retry': true,
-        'X-SFDC-Session': this.sessionId
+      const options = {
+        headers: {
+          'Content-Type': 'text/xml; charset=UTF-8',
+          // The batch retry thing causes issues for the results files.
+          // They get messed up in strange ways, so we disable it.
+          'Sforce-Disable-Batch-Retry': true,
+          'X-SFDC-Session': this.sessionId
+        }
       };
       // PK chunking AKA primary key chunking allows you to get massive amounts
       // of data out quickly, but doesn't support certain things like sort, etc,
       // so you don't always want to use it.
       if (this.options.pkChunking) {
-        headers['Sforce-Enable-PKChunking'] = true;
+        options.headers['Sforce-Enable-PKChunking'] = true;
       }
-      const reply = await axios.post(
-        this.jobUrl,
-        this.jobXml, {
-          headers: headers
-        });
+      const reply = await axios.post(this.jobUrl, this.jobXml, options);
       this.jobResonse = reply.data;
       this.processJobResponse();
     }
@@ -312,7 +349,7 @@ class BulkApi {
     and that's kind of annoying.
   */
   async closeJob(jobId) {
-    jobId = jobId || this.jobId;
+    jobId = jobId || this.jobInfo.id;
     await this.login();
     const reply = await axios.post(
       `${this.jobUrl}/${jobId}`,
@@ -343,7 +380,7 @@ class BulkApi {
     and that's kind of annoying.
   */
   async abortJob(jobId) {
-    jobId = jobId || this.jobId;
+    jobId = jobId || this.jobInfo.id;
     await this.login();
     const reply = await axios.post(
       `${this.jobUrl}/${jobId}`,
@@ -364,12 +401,9 @@ class BulkApi {
 
   /*
     Get info for all the batches in a given job.
-
-    You should never have to call this method directly. It's only needed when
-    getting query results. The methods that need it will call it for you.
   */
   async getBatchInfoList(jobId) {
-    jobId = jobId || this.jobId;
+    jobId = jobId || this.jobInfo.id;
     await this.login();
     const reply = await axios.get(
       this.jobUrl + `/${jobId}/batch`, {
@@ -395,7 +429,7 @@ class BulkApi {
     was successful before you can get your results.
   */
   async getJobInfo(jobId) {
-    jobId = jobId || this.jobId;
+    jobId = jobId || this.jobInfo.id;
     await this.login();
     const reply = await axios.get(
       this.jobUrl + `/${jobId}`, {
@@ -503,14 +537,21 @@ class BulkApi {
         "apexProcessingTime": 0
       }
     } */
-    const jobInfo = xmlParser.parse(this.jobResonse).jobInfo;
-    this.jobId = jobInfo.id;
-    this.jobState = jobInfo.state;
+    this.jobInfo = xmlParser.parse(this.jobResonse).jobInfo;
+    // this.jobInfo.id = jobInfo.id;
+    // this.jobInfo.state = jobInfo.state;
+    // this.numberBatchesQueued = jobInfo.numberBatchesQueued;
+    // this.numberBatchesInProgress = jobInfo.numberBatchesInProgress;
+    // this.numberBatchesCompleted = jobInfo.numberBatchesCompleted;
+    // this.numberBatchesFailed = jobInfo.numberBatchesFailed;
+    // this.numberBatchesTotal = jobInfo.numberBatchesTotal;
+    // this.numberRecordsProcessed = jobInfo.numberRecordsProcessed;
+    // this.numberRecordsFailed = jobInfo.numberRecordsFailed;
   }
 
   /*
     After we get a list of the info for all the batches of our job we save
-    the batch ids in this.batchIds.
+    the batch infos in this.batchInfos.
 
     This list of batch ids is intended to be used to retrieve the results of
     your batch. So one small caveat is that we dont add any batch id if the
@@ -537,17 +578,10 @@ class BulkApi {
     </batchInfoList> */
     // I like this XML parser. batchInfo will either be an object or an array
     // depending on if there are one or more batchInfos.
-    this.batchIds = [];
-    let batchInfo = xmlParser.parse(this.batchListResponse).batchInfoList.batchInfo;
-    if (!Array.isArray(batchInfo)) {
-      batchInfo = [batchInfo];
+    this.batchInfos = xmlParser.parse(this.batchListResponse).batchInfoList.batchInfo;
+    if (!Array.isArray(this.batchInfos)) {
+      this.batchInfos = [this.batchInfos];
     }
-    batchInfo.forEach((bi) => {
-      if (bi.state !== 'NotProcessed') {
-        console.log(bi.id);
-        this.batchIds.push(bi.id);
-      }
-    });
   }
 }
 

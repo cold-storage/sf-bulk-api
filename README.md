@@ -2,6 +2,11 @@
 
 For Node.js - implements most of the original Salesforce Bulk API
 
+**STATUS**
+
+Unstable. Not tested. We will stay on version 0.0.x till things are at least
+beta quality.
+
 **Install**
 
 ```sh
@@ -12,22 +17,19 @@ npm i sf-bulk-api
 
 ```js
 const BulkApi = require('sf-bulk-api');
-const options = require('../opts');
 const bulkApi = new BulkApi(options);
-const csvAppendStream = require('csv-append-stream');
 
 bulkApi
   .addBatch('select Id from Account limit 100')
-  .then(somehowPollTillJobSuccess)
-  .then(bulkApi.getQueryResults)
+  .then(waitForJobToComplete)
+  .then(bulkApi.getQueryResults.bind(bulkApi))
   .then((stream) => {
-    csvAppendStream(stream).pipe(process.stdout);
+    stream.pipe(process.stdout);
   })
   .catch((err) => {
     console.error(err);
   });
 ```
 
-The only missing piece above is `somehowPollTillJobSuccess`. Leave that as an
-exercise to the reader. Should be simple. Keep calling `getJobInfo()` till it's
-all success.
+The only missing piece above is `waitForJobToComplete`.  Should be simple. Keep
+calling `getJobInfo()` till it's all success.
