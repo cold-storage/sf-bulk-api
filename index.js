@@ -141,24 +141,6 @@ class BulkApi {
   }
 
   /*
-    Get info for all the batches in a given job.
-  */
-  async getBatchInfoList(jobId) {
-    jobId = jobId || this.jobInfo.id;
-    await this.login();
-    const reply = await axios.get(
-      this.jobUrl + `/${jobId}/batch`, {
-        headers: {
-          'Content-Type': 'text/xml; charset=UTF-8',
-          'X-SFDC-Session': this.sessionId
-        }
-      });
-    this.batchListResponse = reply.data;
-    this.processBatchListResponse();
-    return this.batchListResponse;
-  }
-
-  /*
     Return the results of a query type job as a stream.
 
     We assume you already have verified that the query job was successful.
