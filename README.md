@@ -15,21 +15,4 @@ npm i sf-bulk-api
 
 **Enjoy**
 
-```js
-const BulkApi = require('sf-bulk-api');
-const bulkApi = new BulkApi(options);
-
-bulkApi
-  .addBatch('select Id from Account limit 100')
-  .then(waitForJobToComplete)
-  .then(bulkApi.getQueryResults.bind(bulkApi))
-  .then((stream) => {
-    stream.pipe(process.stdout);
-  })
-  .catch((err) => {
-    console.error(err);
-  });
-```
-
-The only missing piece above is `waitForJobToComplete`.  Should be simple. Keep
-calling `getJobInfo()` till it's all success.
+See `test.js`.

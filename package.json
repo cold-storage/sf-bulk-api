@@ -1,6 +1,6 @@
 {
   "name": "sf-bulk-api",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "For Node.js - implements most of the original Salesforce Bulk API",
   "main": "index.js",
   "scripts": {
@@ -17,8 +17,9 @@
   },
   "homepage": "https://github.com/johndstein/sf-bulk-api#readme",
   "dependencies": {
-    "axios": "0.17.1",
-    "csv-append-stream": "0.0.1",
-    "fast-xml-parser": "2.9.1"
+    "axios": "0.18.0",
+    "byline": "5.0.0",
+    "fast-xml-parser": "3.9.11",
+    "highland": "2.13.0"
   }
 }

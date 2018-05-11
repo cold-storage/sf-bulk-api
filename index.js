@@ -4,7 +4,62 @@
 
 const axios = require('axios');
 const xmlParser = require('fast-xml-parser');
-const csvAppendStream = require('csv-append-stream');
+const byline = require('byline');
+const {
+  Transform
+} = require('stream');
+const _ = require('highland');
+// const csvAppendStream = require('csv-append-stream');
+
+class JunkRemovr extends Transform {
+  constructor(options) {
+    super(options);
+    this.junk = options.junk || [];
+  }
+  _transform(chunk, encoding, callback) {
+    let isJunk = false;
+    for (let i = 0, l = this.junk.length; i < l && !isJunk; i++) {
+      if (this.junk[i].test(chunk.toString())) {
+        isJunk = true;
+      }
+    }
+    if (isJunk) {
+      callback();
+    } else {
+      callback(null, chunk);
+    }
+  }
+}
+
+class HeaderRemovr extends Transform {
+  constructor(options) {
+    super(options);
+  }
+  _transform(chunk, encoding, callback) {
+    if (chunk.toString().trim().length === 0) {
+      callback();
+    } else {
+      if (this.header) {
+        if (chunk.toString() === this.header) {
+          return callback();
+        }
+      } else {
+        this.header = chunk.toString();
+      }
+      callback(null, chunk);
+    }
+  }
+}
+
+const newlineAddr = new Transform({
+  transform(chunk, encoding, callback) {
+    if (chunk.toString().trim().length > 0) {
+      callback(null, chunk + '\n');
+    } else {
+      callback();
+    }
+  }
+});
 
 /*
 
@@ -158,16 +213,13 @@ class BulkApi {
     Non PK Chunking queries will only have one batch, but the batch may have
     multiple query results. So don't assume one query result per batch.
 
-    TODO !!! XXX Handle PK chunking 'Records not found for this query' header
-    row!!!
-
     TODO !!! XXX Handle stream errors. Thinking of adding error handler to
     all streams where BulkApi emits an error even that clients can catch.
   */
   async getQueryResults(jobId) {
     jobId = jobId || this.jobInfo.id;
     await this.getBatchInfoList(jobId);
-    const streams = [];
+    let streams = [];
     for (const batchInfo of this.batchInfos) {
       // https://stackoverflow.com/a/4156156/8599429
       if (batchInfo.state !== 'NotProcessed') {
@@ -175,7 +227,31 @@ class BulkApi {
           await this.getBatchQueryResults(batchInfo.id, jobId));
       }
     }
-    return csvAppendStream(streams);
+    // console.error('STREAMS: ' , streams.length);
+    // Construct an empty highland stream.
+    let result = _([]);
+    // Append all our result streams making sure there's at least one
+    // newline between each stream of data.
+    for (let i = 0, l = streams.length; i < l; i++) {
+      result = result.concat(streams[i]).concat(['\n']);
+    }
+    // byline splits the combined stream into lines and removes all blank lines.
+    return byline(
+      // Turn the highland stream that now has all our streams combined back
+      // into a node stream.
+      result
+        .toNodeStream())
+      // Remove lines that match the given regexs.
+      .pipe(new JunkRemovr({
+        junk: [
+          /Records not found for this query/,
+          /^#.*/
+        ]
+      }))
+      // Remove all but the first header line.
+      .pipe(new HeaderRemovr())
+      // Add newlines back into the stream (because byline removed them all).
+      .pipe(newlineAddr);
   }
 
   async getBatchQueryResults(batchId, jobId) {
