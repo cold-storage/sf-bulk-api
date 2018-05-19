@@ -240,7 +240,7 @@ class BulkApi {
         }
       }
     };
-    console.error(options);
+    //console.error(options);
     const files = await u2f(options);
     files.forEach(f => {
       ss.write(fs.createReadStream(f));
