@@ -4,17 +4,23 @@
 
 const axios = require('axios');
 const xmlParser = require('fast-xml-parser');
+const {
+  promisify
+} = require('util');
+const urls2files = require('urls2files');
+const u2f = promisify(urls2files);
+const ss = require('stream-stream')({
+  separator: '\n'
+});
 const byline = require('byline');
+const fs = require('fs');
 const {
   Transform
 } = require('stream');
-const _ = require('highland');
-// const csvAppendStream = require('csv-append-stream');
-
-class JunkRemovr extends Transform {
-  constructor(options) {
-    super(options);
-    this.junk = options.junk || [];
+class JunkFilter extends Transform {
+  constructor(junk) {
+    super();
+    this.junk = junk || [];
   }
   _transform(chunk, encoding, callback) {
     let isJunk = false;
@@ -31,9 +37,9 @@ class JunkRemovr extends Transform {
   }
 }
 
-class HeaderRemovr extends Transform {
-  constructor(options) {
-    super(options);
+class HeaderFilter extends Transform {
+  constructor() {
+    super();
   }
   _transform(chunk, encoding, callback) {
     if (chunk.toString().trim().length === 0) {
@@ -51,7 +57,7 @@ class HeaderRemovr extends Transform {
   }
 }
 
-const newlineAddr = new Transform({
+const addNewlines = new Transform({
   transform(chunk, encoding, callback) {
     if (chunk.toString().trim().length > 0) {
       callback(null, chunk + '\n');
@@ -60,7 +66,6 @@ const newlineAddr = new Transform({
     }
   }
 });
-
 /*
 
   Provides most of the functionality of the Salesforce Bulk API.
@@ -219,42 +224,38 @@ class BulkApi {
   async getQueryResults(jobId) {
     jobId = jobId || this.jobInfo.id;
     await this.getBatchInfoList(jobId);
-    let streams = [];
+    const urls = [];
     for (const batchInfo of this.batchInfos) {
       // https://stackoverflow.com/a/4156156/8599429
       if (batchInfo.state !== 'NotProcessed') {
-        streams.push.apply(streams,
-          await this.getBatchQueryResults(batchInfo.id, jobId));
+        urls.push.apply(urls,
+          await this.getBatchQueryResultUrls(batchInfo.id, jobId));
       }
     }
-    // console.error('STREAMS: ' , streams.length);
-    // Construct an empty highland stream.
-    let result = _([]);
-    // Append all our result streams making sure there's at least one
-    // newline between each stream of data.
-    for (let i = 0, l = streams.length; i < l; i++) {
-      result = result.concat(streams[i]).concat(['\n']);
-    }
-    // byline splits the combined stream into lines and removes all blank lines.
-    return byline(
-      // Turn the highland stream that now has all our streams combined back
-      // into a node stream.
-      result
-        .toNodeStream())
-      // Remove lines that match the given regexs.
-      .pipe(new JunkRemovr({
-        junk: [
-          /Records not found for this query/,
-          /^#.*/
-        ]
-      }))
-      // Remove all but the first header line.
-      .pipe(new HeaderRemovr())
-      // Add newlines back into the stream (because byline removed them all).
-      .pipe(newlineAddr);
+    const options = {
+      urls: urls,
+      https: {
+        headers: {
+          'X-SFDC-Session': this.sessionId
+        }
+      }
+    };
+    console.error(options);
+    const files = await u2f(options);
+    files.forEach(f => {
+      ss.write(fs.createReadStream(f));
+    });
+    ss.end();
+    return byline(ss)
+      .pipe(new JunkFilter(
+        [/Records not found for this query/]
+      ))
+      .pipe(new HeaderFilter())
+      .pipe(addNewlines);
+    //return await getCsvsAsync(options);
   }
 
-  async getBatchQueryResults(batchId, jobId) {
+  async getBatchQueryResultUrls(batchId, jobId) {
     jobId = jobId || this.jobInfo.id;
     await this.login();
     const batchResultXml = await axios.get(
@@ -275,32 +276,11 @@ class BulkApi {
     if (!Array.isArray(brJson)) {
       brJson = [brJson];
     }
-    const streams = [];
+    const urls = [];
     for (const result of brJson) {
-      // https://stackoverflow.com/a/4156156/8599429
-      streams.push(
-        await this.getBatchQueryResult(result.result, batchId, jobId));
+      urls.push(`${this.jobUrl}/${jobId}/batch/${batchId}/result/${result.result}`);
     }
-    return streams;
-  }
-
-  /*
-    Gets the results of a query type job. The results of insert/update/delete
-    jobs are returned by getBatchResult.
-
-    Looks like Salesforce breaks chunks down to not be larger than 1 GB.
-  */
-  async getBatchQueryResult(resultId, batchId, jobId) {
-    jobId = jobId || this.jobInfo.id;
-    await this.login();
-    const response = await axios.get(
-      `${this.jobUrl}/${jobId}/batch/${batchId}/result/${resultId}`, {
-        responseType: 'stream',
-        headers: {
-          'X-SFDC-Session': this.sessionId
-        }
-      });
-    return response.data;
+    return urls;
   }
 
   /*

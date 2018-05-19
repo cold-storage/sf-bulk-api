@@ -3,8 +3,8 @@
 'use strict';
 
 const BulkApi = require('./');
-const options = require('../../candoris/get-schooled-sfio-config').source;
-options.object = 'Contact';
+const options = require('../../candoris/sfio-wycliffe-prod').source;
+options.object = 'Opportunity';
 options.operation = 'query';
 options.pkChunking = true;
 const api = new BulkApi(options);
@@ -37,9 +37,9 @@ async function waitForJobToComplete() {
 }
 
 async function doQuery() {
-  await api.addBatch('select Id, Name from Contact');
-  await waitForJobToComplete();
-  const stream = await api.getQueryResults();
+  // await api.addBatch('select Id, Name from Opportunity');
+  // await waitForJobToComplete();
+  const stream = await api.getQueryResults('7503600000OzPEQ');
   stream.pipe(process.stdout);
 }
 
