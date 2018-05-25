@@ -240,7 +240,6 @@ class BulkApi {
         }
       }
     };
-    //console.error(options);
     const files = await u2f(options);
     files.forEach(f => {
       ss.write(fs.createReadStream(f));
@@ -252,7 +251,6 @@ class BulkApi {
       ))
       .pipe(new HeaderFilter())
       .pipe(addNewlines);
-    //return await getCsvsAsync(options);
   }
 
   async getBatchQueryResultUrls(batchId, jobId) {
